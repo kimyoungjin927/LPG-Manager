@@ -17,6 +17,15 @@ def get_engine():
         user_pass, host_port_db = rest.rsplit("@", 1)
         user, password = user_pass.split(":", 1)
         host_port, db_part = host_port_db.split("/", 1)
+       from sqlalchemy.engine import URL
+
+def get_engine():
+    raw_url = str(st.secrets["DATABASE_URL"]).strip()
+    if "://" in raw_url:
+        rest = raw_url.split("://", 1)[1]
+        user_pass, host_port_db = rest.rsplit("@", 1)
+        user, password = user_pass.split(":", 1)
+        host_port, db_part = host_port_db.split("/", 1)
         db_name = db_part.split("://")[0].split("?")[0]
         host, port = host_port.split(":", 1)
         url_obj = URL.create(
@@ -27,8 +36,10 @@ def get_engine():
             port=int(port),
             database=db_name
         )
-            return create_engine(url_obj, pool_pre_ping=True)
+        return create_engine(url_obj, pool_pre_ping=True)
     return create_engine(raw_url, pool_pre_ping=True)
+
+engine = get_engine()
 
 engine = get_engine()
 

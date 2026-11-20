@@ -243,7 +243,7 @@ with tab2:
             cpress = r1_c3.selectbox("압력 설정", ["2.8kPa", "25kPa"], index=def_press_idx)
 
             r2_c1, r2_c2, r2_c3 = st.columns(3)
-            ctkg = r2_c1.selectbox("용기 규격 (kg)",, index=def_tkg_idx)
+            ctkg = r2_c1.selectbox("용기 규격 (kg)", (20, 50), index=def_tkg_idx)
             ctcnt = r2_c2.number_input("설치 통수", min_value=1, max_value=50, value=def_tcnt)
             ccf = r2_c3.number_input("개별 보정계수 (0=공통적용)", min_value=0.0, step=0.01, value=def_cf, format="%.2f")
 

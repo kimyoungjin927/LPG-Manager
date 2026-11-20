@@ -210,61 +210,148 @@ with tab3:
     st.download_button("📥 엑셀(.xlsx) 다운로드", data=output.getvalue(), file_name=f"LPG_{target_month}.xlsx", type="primary")
 
 with tab4:
-    st.subheader("1️⃣ 직원 등록 및 삭제")
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        with st.form("add_staff", clear_on_submit=True):
-            n_staff = st.text_input("신규 직원 이름")
-            n_role = st.selectbox("직무", ["현장기사", "사무관리"])
-            if st.form_submit_button("➕ 직원 등록", type="primary") and n_staff.strip():
-                with engine.begin() as conn:
-                    conn.execute(text("INSERT INTO staff VALUES (:n,:r,:d) ON CONFLICT (name) DO NOTHING"), {"n": n_staff.strip(), "r": n_role, "d": datetime.now().strftime("%Y-%m-%d")})
+    st.subheader("🔒 관리자 전용 설정")
+    if "is_admin" not in st.session_state:
+        st.session_state["is_admin"] = False
+
+    if not st.session_state["is_admin"]:
+        st.warning("직원 관리, 거래처 등록·수정·삭제, 계절 보정값 수정은 관리자 비밀번호가 필요합니다.")
+        pw_input = st.text_input("관리자 비밀번호 입력", type="password")
+        if st.button("🔓 관리자 잠금 해제", type="primary"):
+            admin_pw = str(st.secrets.get("ADMIN_PASS", "1234"))
+            if pw_input == admin_pw:
+                st.session_state["is_admin"] = True
                 st.rerun()
-    with sc2:
-        if not staff_df.empty:
-            d_staff = st.selectbox("삭제할 직원", staff_df["name"].tolist())
-            if st.button("🗑️ 직원 삭제"):
+            else:
+                st.error("비밀번호가 일치하지 않습니다.")
+    else:
+        col_top1, col_top2 = st.columns([4, 1])
+        col_top1.success("✅ 관리자 모드로 인증되었습니다.")
+        if col_top2.button("🔒 잠그기"):
+            st.session_state["is_admin"] = False
+            st.rerun()
+
+        st.divider()
+        st.subheader("1️⃣ 직원 등록 및 삭제")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            with st.form("add_staff", clear_on_submit=True):
+                n_staff = st.text_input("신규 직원 이름")
+                n_role = st.selectbox("직무", ["현장기사", "사무관리"])
+                if st.form_submit_button("➕ 직원 등록", type="primary") and n_staff.strip():
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO staff VALUES (:n,:r,:d) ON CONFLICT (name) DO NOTHING"), {"n": n_staff.strip(), "r": n_role, "d": datetime.now().strftime("%Y-%m-%d")})
+                    st.rerun()
+        with sc2:
+            if not staff_df.empty:
+                d_staff = st.selectbox("삭제할 직원", staff_df["name"].tolist())
+                if st.button("🗑️ 직원 삭제"):
+                    with engine.begin() as conn:
+                        conn.execute(text("DELETE FROM staff WHERE name=:n"), {"n": d_staff})
+                    st.rerun()
+
+        st.divider()
+        st.subheader("2️⃣ 거래처 등록 / 기존 거래처 불러와서 수정")
+        
+        cust_options = ["➕ 신규 거래처 직접 입력"] + (customers_df["name"].tolist() if not customers_df.empty else [])
+        selected_load_cust = st.selectbox("기존 거래처 불러오기 (수정할 거래처를 선택하면 아래 칸에 자동 입력됩니다)", cust_options)
+
+        # 선택된 거래처의 기존 값 세팅
+        if selected_load_cust != "➕ 신규 거래처 직접 입력":
+            c_info = customers_df[customers_df["name"] == selected_load_cust].iloc[0]
+            def_name = str(c_info["name"])
+            def_press_idx = 0 if c_info["pressure"] == "2.8kPa" else 1
+            def_tkg_idx = 0 if int(c_info["tank_kg"]) == 20 else 1
+            def_tcnt = int(c_info["tank_count"])
+            def_cf = float(c_info["custom_factor"]) if pd.notna(c_info["custom_factor"]) else 0.0
+
+            # 최근 계량기 및 잔량 불러오기
+            c_logs = calc_df[calc_df["거래처명"] == selected_load_cust] if not calc_df.empty else pd.DataFrame()
+            if not c_logs.empty:
+                def_meter = float(c_logs.iloc[0]["현재계량기"])
+                def_remain = float(c_logs.iloc[0]["계산잔량kg"])
+            else:
+                def_meter = 0.0
+                def_remain = float(int(c_info["tank_kg"]) * int(c_info["tank_count"]))
+        else:
+            def_name = ""
+            def_press_idx = 0
+            def_tkg_idx = 1
+            def_tcnt = 2
+            def_cf = 0.0
+            def_meter = 0.0
+            def_remain = 0.0
+
+        with st.form("add_or_edit_cust"):
+            c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
+            cname = c1.text_input("거래처명", value=def_name)
+            cpress = c2.selectbox("압력", ["2.8kPa", "25kPa"], index=def_press_idx)
+            ctkg = c3.selectbox("용기(kg)", [20, 50], index=def_tkg_idx)
+            ctcnt = c4.number_input("설치통수", min_value=1, max_value=50, value=def_tcnt)
+            ccf = c5.number_input("개별보정계수(0=공통)", min_value=0.0, step=0.01, value=def_cf, format="%.2f")
+
+            st.caption("▼ 신규 등록이거나 현재 시점 기준으로 계량기·잔량 기준점을 새로 잡을 때만 아래를 체크하세요.")
+            ic1, ic2, ic3, ic4 = st.columns([1.2, 1, 1, 1])
+            save_init_log = ic1.checkbox("계량기/잔량 기준값 기록 저장", value=(selected_load_cust == "➕ 신규 거래처 직접 입력"))
+            idate = ic2.date_input("기준일", value=date.today())
+            imeter = ic3.number_input("기준 계량기", min_value=0.0, step=0.1, value=def_meter, format="%.1f")
+            iremain = ic4.number_input("기준 잔량(kg)", min_value=0.0, step=1.0, value=def_remain, format="%.1f")
+
+            if st.form_submit_button("💾 거래처 정보 저장 (등록/수정)", type="primary"):
+                clean_cname = cname.strip()
+                if not clean_cname:
+                    st.error("거래처명을 입력하세요.")
+                else:
+                    final_cf = ccf if ccf > 0 else None
+                    with engine.begin() as conn:
+                        # 만약 기존 거래처 이름을 변경했다면 기존 이름 삭제 후 새 이름으로 저장
+                        if selected_load_cust != "➕ 신규 거래처 직접 입력" and selected_load_cust != clean_cname:
+                            conn.execute(text("DELETE FROM customers WHERE name=:old_n"), {"old_n": selected_load_cust})
+                        conn.execute(
+                            text("""INSERT INTO customers VALUES (:n,:p,:kg,:cnt,1,:cf)
+                                    ON CONFLICT (name) DO UPDATE SET pressure=:p, tank_kg=:kg, tank_count=:cnt, custom_factor=:cf"""),
+                            {"n": clean_cname, "p": cpress, "kg": ctkg, "cnt": ctcnt, "cf": final_cf}
+                        )
+                        if save_init_log:
+                            conn.execute(
+                                text("""INSERT INTO logs (visit_date, customer_name, work_type, meter_reading, supply_count, actual_remain, staff_name, memo, created_at)
+                                        VALUES (:vd,:cn,'초기세팅',:mr,0,:ar,'관리자','기준값 세팅/수정',:ca)"""),
+                                {"vd": idate.strftime("%Y-%m-%d"), "cn": clean_cname, "mr": imeter, "ar": iremain, "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                            )
+                    st.success(f"[{clean_cname}] 거래처 설정이 저장되었습니다!")
+                    st.rerun()
+
+        if not customers_df.empty:
+            dc1, dc2 = st.columns([3, 1])
+            del_c = dc1.selectbox("삭제할 거래처 선택", customers_df["name"].tolist(), label_visibility="collapsed")
+            if dc2.button("🗑️ 선택한 거래처 삭제"):
                 with engine.begin() as conn:
-                    conn.execute(text("DELETE FROM staff WHERE name=:n"), {"n": d_staff})
+                    conn.execute(text("DELETE FROM customers WHERE name=:n"), {"n": del_c})
+                st.warning(f"[{del_c}] 거래처가 삭제되었습니다.")
                 st.rerun()
 
-    st.divider()
-    st.subheader("2️⃣ 신규 거래처 초기 세팅 및 삭제")
-    with st.form("add_cust", clear_on_submit=True):
-        c1, c2, c3, c4 = st.columns(4)
-        cname = c1.text_input("신규 거래처명")
-        cpress = c2.selectbox("압력", ["2.8kPa", "25kPa"])
-        ctkg = c3.selectbox("용기(kg)", [20, 50])
-        ctcnt = c4.number_input("설치통수", min_value=1, value=2)
-        ic1, ic2, ic3 = st.columns(3)
-        idate = ic1.date_input("기준일", value=date.today())
-        imeter = ic2.number_input("시작 계량기", min_value=0.0, step=0.1)
-        iremain = ic3.number_input("시작 잔량(kg)", min_value=0.0, step=1.0)
-        if st.form_submit_button("➕ 거래처 등록 및 초기값 저장", type="primary") and cname.strip():
-            with engine.begin() as conn:
-                conn.execute(text("INSERT INTO customers VALUES (:n,:p,:kg,:cnt,1,NULL) ON CONFLICT (name) DO UPDATE SET pressure=:p, tank_kg=:kg, tank_count=:cnt"), {"n": cname.strip(), "p": cpress, "kg": ctkg, "cnt": ctcnt})
-                conn.execute(text("INSERT INTO logs (visit_date, customer_name, work_type, meter_reading, supply_count, actual_remain, staff_name, memo, created_at) VALUES (:vd,:cn,'초기세팅',:mr,0,:ar,'관리자','초기세팅',:ca)"), {"vd": idate.strftime("%Y-%m-%d"), "cn": cname.strip(), "mr": imeter, "ar": iremain, "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-            st.rerun()
+        st.divider()
+        st.subheader("3️⃣ 계절별(여름/겨울) 압력 보정값")
+        s_map = settings_df.set_index("key")["value"].to_dict()
+        with st.form("set_form"):
+            b1, b2, b3 = st.columns(3)
+            v28 = b1.number_input("2.8kPa 계수 (기본 2.00)", value=float(s_map.get("factor_2_8kpa", 2.0)), step=0.01, format="%.2f")
+            v25 = b2.number_input("25kPa 계수 (기본 2.50)", value=float(s_map.get("factor_25kpa", 2.5)), step=0.01, format="%.2f")
+            verr = b3.number_input("오차경고 기준(kg)", value=float(s_map.get("error_threshold", -10.0)), step=1.0)
+            if st.form_submit_button("💾 보정값 저장"):
+                with engine.begin() as conn:
+                    conn.execute(text("UPDATE settings SET value=:v WHERE key='factor_2_8kpa'"), {"v": v28})
+                    conn.execute(text("UPDATE settings SET value=:v WHERE key='factor_25kpa'"), {"v": v25})
+                    conn.execute(text("UPDATE settings SET value=:v WHERE key='error_threshold'"), {"v": verr})
+                st.success("보정값이 저장되었습니다!")
+                st.rerun()
 
-    if not customers_df.empty:
-        dc1, dc2 = st.columns([3, 1])
-        del_c = dc1.selectbox("삭제할 거래처", customers_df["name"].tolist(), label_visibility="collapsed")
-        if dc2.button("🗑️ 거래처 삭제"):
-            with engine.begin() as conn:
-                conn.execute(text("DELETE FROM customers WHERE name=:n"), {"n": del_c})
-            st.rerun()
-
-    st.divider()
-    st.subheader("3️⃣ 계절별(여름/겨울) 압력 보정값")
-    s_map = settings_df.set_index("key")["value"].to_dict()
-    with st.form("set_form"):
-        b1, b2, b3 = st.columns(3)
-        v28 = b1.number_input("2.8kPa 계수 (기본 2.00)", value=float(s_map.get("factor_2_8kpa", 2.0)), step=0.01, format="%.2f")
-        v25 = b2.number_input("25kPa 계수 (기본 2.50)", value=float(s_map.get("factor_25kpa", 2.5)), step=0.01, format="%.2f")
-        verr = b3.number_input("오차경고 기준(kg)", value=float(s_map.get("error_threshold", -10.0)), step=1.0)
-        if st.form_submit_button("💾 보정값 저장"):
-            with engine.begin() as conn:
-                conn.execute(text("UPDATE settings SET value=:v WHERE key='factor_2_8kpa'"), {"v": v28})
-                conn.execute(text("UPDATE settings SET value=:v WHERE key='factor_25kpa'"), {"v": v25})
-                conn.execute(text("UPDATE settings SET value=:v WHERE key='error_threshold'"), {"v": verr})
-            st.rerun()
+        st.divider()
+        st.subheader("4️⃣ 잘못 입력된 검침/교체 기록 삭제")
+        if not calc_df.empty:
+            del_log_id = st.number_input("삭제할 기록의 ID 번호", min_value=1, step=1)
+            if st.button("🗑️ 해당 ID 기록 삭제"):
+                with engine.begin() as conn:
+                    conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": int(del_log_id)})
+                st.warning(f"ID {del_log_id}번 기록이 삭제되었습니다.")
+                st.rerun()

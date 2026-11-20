@@ -239,7 +239,7 @@ with tab3:
         c_m_logs = month_logs[month_logs["거래처명"] == cname] if not month_logs.empty else pd.DataFrame()
         if not c_m_logs.empty:
             for _, l_row in c_m_logs.sort_values("방문일자").iterrows():
-                day_num = int(l_row["방문일자"].split("-"))
+                day_num = int(l_row["방문일자"][-2:])
                 cell_txt = f"{int(l_row['현재계량기'])}/{int(l_row['계산잔량kg'])}"
                 row_dict[f"{day_num}일"] = f"{row_dict[f'{day_num}일']} | {cell_txt}" if row_dict[f"{day_num}일"] else cell_txt
             row_dict["월사용(kg)"] = round(c_m_logs["환산사용kg"].sum(), 1)

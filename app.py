@@ -122,12 +122,10 @@ with tab1:
     staff_list = staff_df["name"].tolist() if not staff_df.empty else ["미등록직원"]
     cust_list = customers_df["name"].tolist() if not customers_df.empty else ["거래처없음"]
 
-    # 폼 바깥에서 거래처를 먼저 선택해야 담당 직원이 즉시 자동으로 바뀜
     top_c1, top_c2 = st.columns(2)
     visit_dt = top_c1.date_input("방문 일자", value=date.today(), min_value=date(2020, 1, 1), max_value=date(2035, 12, 31))
     selected_cust = top_c2.selectbox("거래처 선택 (상호 검색 가능)", cust_list)
 
-    # 선택한 거래처의 배정된 담당 직원 찾기
     assigned_mgr = "미지정"
     if not customers_df.empty and selected_cust in customers_df["name"].values:
         _, cust_row = next(customers_df[customers_df["name"] == selected_cust].iterrows())
@@ -169,31 +167,40 @@ with tab1:
 
     if not calc_df.empty:
         st.divider()
-        st.caption("📋 최근 입력 내역 (오입력 삭제 시 왼쪽 `선택` 칸을 체크한 뒤 아래 삭제 버튼을 누르세요)")
-        
-        view_df = calc_df[["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]].copy()
-        view_df.insert(0, "선택", False)
+        three_months_ago = (pd.Timestamp(date.today()) - pd.DateOffset(months=3)).strftime("%Y-%m-%d")
+        filtered_calc = calc_df[
+            (calc_df["거래처명"] == selected_cust) &
+            (calc_df["방문일자"] >= three_months_ago)
+        ].copy()
 
-        edited_view = st.data_editor(
-            view_df,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"],
-            column_config={
-                "선택": st.column_config.CheckboxColumn("선택", default=False, width="small")
-            },
-            key="field_logs_editor"
-        )
+        st.caption(f"📋 **[{selected_cust}]** 최근 3개월 내역 ({three_months_ago} 이후) — 오입력 시 왼쪽 `선택` 체크 후 삭제")
 
-        selected_rows = edited_view[edited_view["선택"] == True]
-        if not selected_rows.empty:
-            if st.button(f"🗑️ 선택한 {len(selected_rows)}건 기록 즉시 삭제", type="primary", use_container_width=True):
-                del_ids = selected_rows["ID"].astype(int).tolist()
-                with engine.begin() as conn:
-                    for did in del_ids:
-                        conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": did})
-                st.warning(f"선택한 {len(del_ids)}건의 입력 기록이 삭제되었습니다.")
-                st.rerun()
+        if not filtered_calc.empty:
+            view_df = filtered_calc[["ID", "방문일자", "작업구분", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]].copy()
+            view_df.insert(0, "선택", False)
+
+            edited_view = st.data_editor(
+                view_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["ID", "방문일자", "작업구분", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"],
+                column_config={
+                    "선택": st.column_config.CheckboxColumn("선택", default=False, width="small")
+                },
+                key=f"field_logs_editor_{selected_cust}"
+            )
+
+            selected_rows = edited_view[edited_view["선택"] == True]
+            if not selected_rows.empty:
+                if st.button(f"🗑️ 선택한 {len(selected_rows)}건 기록 즉시 삭제", type="primary", use_container_width=True):
+                    del_ids = selected_rows["ID"].astype(int).tolist()
+                    with engine.begin() as conn:
+                        for did in del_ids:
+                            conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": did})
+                    st.warning(f"선택한 {len(del_ids)}건의 입력 기록이 삭제되었습니다.")
+                    st.rerun()
+        else:
+            st.info(f"[{selected_cust}]의 최근 3개월 이내 입력 기록이 없습니다.")
 
 with tab2:
     st.subheader("📊 거래처별 현재 예상 잔량 및 오차 현황")
@@ -377,7 +384,7 @@ with tab4:
         sys_f25 = float(s_map.get("factor_25kpa", 2.50))
 
         cust_options = ["➕ 신규 거래처 직접 입력"] + (customers_df["name"].tolist() if not customers_df.empty else [])
-        selected_load_cust = st.selectbox("대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)", cust_options)
+        selected_load_cust = st.selectbox("대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)", cust_options, key="admin_load_cust_box")
         mgr_choices = ["미지정"] + (staff_df["name"].tolist() if not staff_df.empty else [])
 
         if selected_load_cust != "➕ 신규 거래처 직접 입력":
@@ -404,7 +411,7 @@ with tab4:
             def_name, def_press, def_press_idx, def_tkg_idx, def_tcnt, def_custom_val, def_mgr_idx, def_meter, def_remain = "", "2.8kPa", 0, 1, 2, None, 0, 0.0, 0.0
 
         r1_c1, r1_c2, r1_c3 = st.columns(3)
-        cname = r1_c1.text_input("거래처명 (상호)", value=def_name, key=f"cname_{selected_load_cust}")
+        cname = r1_c1.text_input("거래처명 (상호 - 수정 시 기존 기록도 일괄 변경)", value=def_name, key=f"cname_{selected_load_cust}")
         cmgr = r1_c2.selectbox("담당 직원 배정", mgr_choices, index=def_mgr_idx, key=f"cmgr_{selected_load_cust}")
         cpress = r1_c3.selectbox("압력 설정 (변경 시 보정계수 자동입력)", ("2.8kPa", "25kPa"), index=def_press_idx, key=f"cpress_{selected_load_cust}")
 
@@ -418,7 +425,7 @@ with tab4:
             ccf = r2_c3.number_input(f"적용 보정계수 ({cpress} 설정값: {auto_factor:.2f})", min_value=0.0, step=0.01, value=display_factor, format="%.2f")
 
             st.markdown("---")
-            save_init_log = st.checkbox("초기 세팅 날짜 및 계량기·잔량 기록 함께 저장 (지난 기록 시작일 입력 시 체크)", value=(selected_load_cust == "➕ 신규 거래처 직접 입력"))
+            save_init_log = st.checkbox("초기 세팅 날짜 및 계량기·잔량 기록 함께 저장 (신규 등록 또는 기준 재세팅 시 체크)", value=(selected_load_cust == "➕ 신규 거래처 직접 입력"))
             r3_c1, r3_c2, r3_c3 = st.columns(3)
             idate = r3_c1.date_input("초기 세팅 날짜 (과거 날짜 선택 가능)", value=date.today(), min_value=date(2020, 1, 1), max_value=date(2035, 12, 31))
             imeter = r3_c2.number_input("기준 계량기 (루베)", min_value=0.0, step=0.1, value=def_meter, format="%.1f")
@@ -431,21 +438,33 @@ with tab4:
                 else:
                     final_cf = None if abs(ccf - auto_factor) < 0.001 else ccf
                     with engine.begin() as conn:
-                        if selected_load_cust != "➕ 신규 거래처 직접 입력" and selected_load_cust != clean_cname:
-                            conn.execute(text("DELETE FROM customers WHERE name=:old_n"), {"old_n": selected_load_cust})
-                        conn.execute(
-                            text("""INSERT INTO customers (name, pressure, tank_kg, tank_count, default_supply, custom_factor, manager_name)
-                                    VALUES (:n,:p,:kg,:cnt,1,:cf,:mg)
-                                    ON CONFLICT (name) DO UPDATE SET pressure=:p, tank_kg=:kg, tank_count=:cnt, custom_factor=:cf, manager_name=:mg"""),
-                            {"n": clean_cname, "p": cpress, "kg": ctkg, "cnt": ctcnt, "cf": final_cf, "mg": cmgr}
-                        )
+                        if selected_load_cust != "➕ 신규 거래처 직접 입력":
+                            conn.execute(
+                                text("""UPDATE customers
+                                        SET name=:new_n, pressure=:p, tank_kg=:kg, tank_count=:cnt, custom_factor=:cf, manager_name=:mg
+                                        WHERE name=:old_n"""),
+                                {"new_n": clean_cname, "p": cpress, "kg": ctkg, "cnt": ctcnt, "cf": final_cf, "mg": cmgr, "old_n": selected_load_cust}
+                            )
+                            if selected_load_cust != clean_cname:
+                                conn.execute(
+                                    text("UPDATE logs SET customer_name=:new_n WHERE customer_name=:old_n"),
+                                    {"new_n": clean_cname, "old_n": selected_load_cust}
+                                )
+                        else:
+                            conn.execute(
+                                text("""INSERT INTO customers (name, pressure, tank_kg, tank_count, default_supply, custom_factor, manager_name)
+                                        VALUES (:n,:p,:kg,:cnt,1,:cf,:mg)
+                                        ON CONFLICT (name) DO UPDATE SET pressure=:p, tank_kg=:kg, tank_count=:cnt, custom_factor=:cf, manager_name=:mg"""),
+                                {"n": clean_cname, "p": cpress, "kg": ctkg, "cnt": ctcnt, "cf": final_cf, "mg": cmgr}
+                            )
+
                         if save_init_log:
                             conn.execute(
                                 text("""INSERT INTO logs (visit_date, customer_name, work_type, meter_reading, supply_count, actual_remain, staff_name, memo, created_at)
                                         VALUES (:vd,:cn,'초기세팅',:mr,0,:ar,'관리자','초기 세팅',:ca)"""),
                                 {"vd": idate.strftime("%Y-%m-%d"), "cn": clean_cname, "mr": imeter, "ar": iremain, "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                             )
-                    st.success(f"[{clean_cname}] 저장 완료! (세팅일: {idate.strftime('%Y-%m-%d')}, 압력: {cpress}, 계수: {ccf:.2f})")
+                    st.success(f"[{clean_cname}] 거래처 정보(상호·설정·과거이력)가 일괄 저장되었습니다!")
                     st.rerun()
 
         if not customers_df.empty:

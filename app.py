@@ -150,6 +150,35 @@ with tab1:
                 st.rerun()
 
     if not calc_df.empty:
+        st.divider()
+        st.caption("📋 최근 입력 내역 (오입력 삭제 시 왼쪽 `선택` 칸을 체크한 뒤 아래 삭제 버튼을 누르세요)")
+        
+        view_df = calc_df[["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]].copy()
+        view_df.insert(0, "선택", False)
+
+        edited_view = st.data_editor(
+            view_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"],
+            column_config={
+                "선택": st.column_config.CheckboxColumn("선택", default=False, width="small")
+            },
+            key="field_logs_editor"
+        )
+
+        selected_rows = edited_view[edited_view["선택"] == True]
+        if not selected_rows.empty:
+            if st.button(f"🗑️ 선택한 {len(selected_rows)}건 기록 즉시 삭제", type="primary", use_container_width=True):
+                del_ids = selected_rows["ID"].astype(int).tolist()
+                with engine.begin() as conn:
+                    for did in del_ids:
+                        conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": did})
+                st.warning(f"선택한 {len(del_ids)}건의 입력 기록이 삭제되었습니다.")
+                st.rerun()
+
+
+    if not calc_df.empty:
         st.dataframe(
             calc_df[["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]],
             use_container_width=True,

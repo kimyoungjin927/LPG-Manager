@@ -27,8 +27,13 @@ def get_engine():
             port=int(port),
             database=db_name
         )
-        return create_engine(url_obj, pool_pre_ping=True)
+            return create_engine(url_obj, pool_pre_ping=True)
     return create_engine(raw_url, pool_pre_ping=True)
+
+engine = get_engine()
+
+def init_initial_customers():
+
 
 
 def init_initial_customers():

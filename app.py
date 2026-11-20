@@ -400,13 +400,13 @@ with tab4:
             ccf = r2_c3.number_input(f"적용 보정계수 ({cpress} 설정값: {auto_factor:.2f})", min_value=0.0, step=0.01, value=display_factor, format="%.2f")
 
             st.markdown("---")
-            save_init_log = st.checkbox("계량기 / 잔량 기준값 함께 저장 (신규 등록 또는 기준 재세팅 시 체크)", value=(selected_load_cust == "➕ 신규 거래처 직접 입력"))
+            save_init_log = st.checkbox("초기 세팅 날짜 및 계량기·잔량 기록 함께 저장 (지난 기록 시작일 입력 시 체크)", value=(selected_load_cust == "➕ 신규 거래처 직접 입력"))
             r3_c1, r3_c2, r3_c3 = st.columns(3)
-            idate = r3_c1.date_input("기준 일자", value=date.today())
+            idate = r3_c1.date_input("초기 세팅 날짜 (과거 날짜 선택 가능)", value=date.today(), min_value=date(2020, 1, 1), max_value=date(2035, 12, 31))
             imeter = r3_c2.number_input("기준 계량기 (루베)", min_value=0.0, step=0.1, value=def_meter, format="%.1f")
             iremain = r3_c3.number_input("기준 잔량 (kg)", min_value=0.0, step=1.0, value=def_remain, format="%.1f")
 
-            if st.form_submit_button("💾 거래처 정보 저장 (등록 / 수정)", type="primary", use_container_width=True):
+            if st.form_submit_button("💾 거래처 정보 및 시작 날짜 저장", type="primary", use_container_width=True):
                 clean_cname = cname.strip()
                 if not clean_cname:
                     st.error("거래처명을 입력하세요.")
@@ -424,10 +424,10 @@ with tab4:
                         if save_init_log:
                             conn.execute(
                                 text("""INSERT INTO logs (visit_date, customer_name, work_type, meter_reading, supply_count, actual_remain, staff_name, memo, created_at)
-                                        VALUES (:vd,:cn,'초기세팅',:mr,0,:ar,'관리자','기준값 세팅/수정',:ca)"""),
+                                        VALUES (:vd,:cn,'초기세팅',:mr,0,:ar,'관리자','초기 세팅',:ca)"""),
                                 {"vd": idate.strftime("%Y-%m-%d"), "cn": clean_cname, "mr": imeter, "ar": iremain, "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                             )
-                    st.success(f"[{clean_cname}] 거래처 설정 및 담당직원({cmgr}) 배정이 저장되었습니다!")
+                    st.success(f"[{clean_cname}] 저장 완료! (세팅일: {idate.strftime('%Y-%m-%d')}, 압력: {cpress}, 계수: {ccf:.2f})")
                     st.rerun()
 
         if not customers_df.empty:

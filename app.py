@@ -17,7 +17,11 @@ def get_engine():
         port=int(st.secrets["DB_PORT"]),
         database=st.secrets["DB_NAME"]
     )
-    return create_engine(url_obj, pool_pre_ping=True)
+    return create_engine(
+        url_obj,
+        connect_args={"sslmode": "require"},   # ◀ 바로 이 자리에 들어갑니다!
+        pool_pre_ping=True
+    )
 
 engine = get_engine()
 

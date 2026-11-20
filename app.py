@@ -180,10 +180,10 @@ with tab2:
 
         c_logs = calc_df[calc_df["거래처명"] == cname] if not calc_df.empty else pd.DataFrame()
         if not c_logs.empty:
-            latest = c_logs.iloc
+            latest = next(c_logs.iterrows())[1]
             last_date, last_meter, est_remain = latest["방문일자"], latest["현재계량기"], latest["계산잔량kg"]
             valid_err = c_logs.dropna(subset=["검침오차kg"])
-            last_error = valid_err.iloc["검침오차kg"] if not valid_err.empty else 0.0
+            last_error = next(valid_err.iterrows())[1]["검침오차kg"] if not valid_err.empty else 0.0
         else:
             last_date, last_meter, est_remain, last_error = "-", 0.0, 0.0, 0.0
 

@@ -7,14 +7,29 @@ import os
 
 st.set_page_config(page_title="LPG 공급·검침 통합관리", page_icon="🔥", layout="wide")
 
-@st.cache_resource
-def get_engine():
-    db_url = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-    return create_engine(db_url, pool_pre_ping=True)
+from sqlalchemy.engine import URL
 
-engine = get_engine()
+def get_engine():
+    raw_url = str(st.secrets["DATABASE_URL"]).strip()
+    # 만약 뒷부분에 잘못 붙은 문자가 있어도 자동 정리
+    if "://" in raw_url:
+        rest = raw_url.split("://", 1)[1]
+        user_pass, host_port_db = rest.rsplit("@", 1)
+        user, password = user_pass.split(":", 1)
+        host_port, db_part = host_port_db.split("/", 1)
+        db_name = db_part.split("://")[0].split("?")[0]
+        host, port = host_port.split(":", 1)
+        url_obj = URL.create(
+            drivername="postgresql+psycopg2",
+            username=user,
+            password=password,
+            host=host,
+            port=int(port),
+            database=db_name
+        )
+        return create_engine(url_obj, pool_pre_ping=True)
+    return create_engine(raw_url, pool_pre_ping=True)
+
 
 def init_initial_customers():
     with engine.begin() as conn:

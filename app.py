@@ -177,33 +177,6 @@ with tab1:
                 st.warning(f"선택한 {len(del_ids)}건의 입력 기록이 삭제되었습니다.")
                 st.rerun()
 
-
-    if not calc_df.empty:
-        st.dataframe(
-            calc_df[["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]],
-            use_container_width=True,
-            hide_index=True
-        )
-
-        # 현장 입력 오기입 즉시 취소(삭제) 기능
-        with st.expander("🗑️ 방금 잘못 입력한 기록 취소(삭제)하기"):
-            recent_10 = calc_df.head(10)
-            del_options = {
-                f"ID {r['ID']} | {r['방문일자']} | {r['거래처명']} ({r['작업구분']}, 계량기:{r['현재계량기']}, 담당:{r['담당자']})": int(r["ID"])
-                for _, r in recent_10.iterrows()
-            }
-            selected_del_label = st.selectbox("취소할 입력 내역 선택 (최근 10건)", list(del_options.keys()))
-            if st.button("선택한 입력 내역 즉시 삭제", use_container_width=True):
-                target_id = del_options[selected_del_label]
-                with engine.begin() as conn:
-                    conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": target_id})
-                st.warning(f"ID {target_id}번 입력 기록이 삭제되었습니다.")
-                st.rerun()
-
-
-    if not calc_df.empty:
-        st.dataframe(calc_df[["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]], use_container_width=True, hide_index=True)
-
 with tab2:
     st.subheader("📊 거래처별 현재 예상 잔량 및 오차 현황")
     staff_filter_opts = ["전체 보기"] + (staff_df["name"].tolist() if not staff_df.empty else []) + ["미지정"]

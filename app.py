@@ -1,26 +1,15 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from datetime import datetime, date
 import io
 import os
 
 st.set_page_config(page_title="LPG 공급·검침 통합관리", page_icon="🔥", layout="wide")
 
-from sqlalchemy.engine import URL
-
 def get_engine():
-    raw_url = str(st.secrets["DATABASE_URL"]).strip()
-    # 만약 뒷부분에 잘못 붙은 문자가 있어도 자동 정리
-    if "://" in raw_url:
-        rest = raw_url.split("://", 1)[1]
-        user_pass, host_port_db = rest.rsplit("@", 1)
-        user, password = user_pass.split(":", 1)
-        host_port, db_part = host_port_db.split("/", 1)
-       from sqlalchemy.engine import URL
-
-def get_engine():
-    raw_url = str(st.secrets["DATABASE_URL"]).strip()
+    raw_url = str(st.secrets.get("DATABASE_URL", "")).strip()
     if "://" in raw_url:
         rest = raw_url.split("://", 1)[1]
         user_pass, host_port_db = rest.rsplit("@", 1)
@@ -40,12 +29,6 @@ def get_engine():
     return create_engine(raw_url, pool_pre_ping=True)
 
 engine = get_engine()
-
-engine = get_engine()
-
-def init_initial_customers():
-
-
 
 def init_initial_customers():
     with engine.begin() as conn:

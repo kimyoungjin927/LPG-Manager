@@ -119,21 +119,39 @@ tab1, tab2, tab3, tab4 = st.tabs(("📱 현장 입력", "📊 거래처 현황",
 with tab1:
     st.subheader("📱 현장 검침 및 가스통 교체 입력")
     work_mode = st.radio("작업 유형", ("🔍 중간검침 (계량기만)", "🔄 가스통 교체 (계량기+통수+잔량)"), horizontal=True)
-    staff_list = staff_df["name"].tolist() if not staff_df.empty else ("미등록직원",)
-    cust_list = customers_df["name"].tolist() if not customers_df.empty else ("거래처없음",)
+    staff_list = staff_df["name"].tolist() if not staff_df.empty else ["미등록직원"]
+    cust_list = customers_df["name"].tolist() if not customers_df.empty else ["거래처없음"]
+
+    # 폼 바깥에서 거래처를 먼저 선택해야 담당 직원이 즉시 자동으로 바뀜
+    top_c1, top_c2 = st.columns(2)
+    visit_dt = top_c1.date_input("방문 일자", value=date.today(), min_value=date(2020, 1, 1), max_value=date(2035, 12, 31))
+    selected_cust = top_c2.selectbox("거래처 선택 (상호 검색 가능)", cust_list)
+
+    # 선택한 거래처의 배정된 담당 직원 찾기
+    assigned_mgr = "미지정"
+    if not customers_df.empty and selected_cust in customers_df["name"].values:
+        _, cust_row = next(customers_df[customers_df["name"] == selected_cust].iterrows())
+        if pd.notna(cust_row.get("manager_name")):
+            assigned_mgr = str(cust_row["manager_name"]).strip()
+
+    default_staff_idx = staff_list.index(assigned_mgr) if assigned_mgr in staff_list else 0
 
     with st.form("field_input_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
-        visit_dt = c1.date_input("방문 일자", value=date.today())
-        selected_cust = c1.selectbox("거래처 선택 (상호 검색 가능)", cust_list)
-        selected_staff = c1.selectbox("담당 직원", staff_list)
+        selected_staff = c1.selectbox(
+            f"담당 직원 (배정: {assigned_mgr})",
+            staff_list,
+            index=default_staff_idx,
+            key=f"field_staff_{selected_cust}"
+        )
+        meter_val = c1.number_input("현재 계량기 (루베)", min_value=0.0, step=0.1, format="%.1f")
 
-        meter_val = c2.number_input("현재 계량기 (루베)", min_value=0.0, step=0.1, format="%.1f")
         if "가스통 교체" in work_mode:
             supply_cnt = c2.number_input("교체 통수", min_value=1, max_value=20, value=2, step=1)
             actual_rem_val = c2.number_input("교체 후 총 잔량 (kg)", min_value=0.0, step=1.0, format="%.1f")
         else:
             supply_cnt, actual_rem_val = 0, None
+            c2.info("🔍 중간검침 모드: 계량기 숫자만 입력하면 남은 예상 잔량이 자동 계산됩니다.")
 
         memo_val = st.text_input("메모 (선택)")
         if st.form_submit_button("✅ 저장 및 자동 계산", use_container_width=True, type="primary"):
@@ -146,7 +164,7 @@ with tab1:
                         text("INSERT INTO logs (visit_date, customer_name, work_type, meter_reading, supply_count, actual_remain, staff_name, memo, created_at) VALUES (:vd,:cn,:wt,:mr,:sc,:ar,:sn,:mm,:ca)"),
                         {"vd": visit_dt.strftime("%Y-%m-%d"), "cn": selected_cust, "wt": w_type, "mr": meter_val, "sc": supply_cnt, "ar": actual_rem_val, "sn": selected_staff, "mm": memo_val, "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                     )
-                st.success(f"[{selected_cust}] 저장 완료!")
+                st.success(f"[{selected_cust}] 저장 완료! (담당: {selected_staff})")
                 st.rerun()
 
     if not calc_df.empty:

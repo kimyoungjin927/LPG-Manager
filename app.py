@@ -9,26 +9,18 @@ import os
 st.set_page_config(page_title="LPG 공급·검침 통합관리", page_icon="🔥", layout="wide")
 
 def get_engine():
-    raw_url = str(st.secrets.get("DATABASE_URL", "")).strip()
-    if "://" in raw_url:
-        rest = raw_url.split("://", 1)[1]
-        user_pass, host_port_db = rest.rsplit("@", 1)
-        user, password = user_pass.split(":", 1)
-        host_port, db_part = host_port_db.split("/", 1)
-        db_name = db_part.split("://")[0].split("?")[0]
-        host, port = host_port.split(":", 1)
-        url_obj = URL.create(
-            drivername="postgresql+psycopg2",
-            username=user,
-            password=password,
-            host=host,
-            port=int(port),
-            database=db_name
-        )
-        return create_engine(url_obj, pool_pre_ping=True)
-    return create_engine(raw_url, pool_pre_ping=True)
+    url_obj = URL.create(
+        drivername="postgresql+psycopg2",
+        username=st.secrets["DB_USER"],
+        password=st.secrets["DB_PASS"],
+        host=st.secrets["DB_HOST"],
+        port=int(st.secrets["DB_PORT"]),
+        database=st.secrets["DB_NAME"]
+    )
+    return create_engine(url_obj, pool_pre_ping=True)
 
 engine = get_engine()
+
 
 def init_initial_customers():
     with engine.begin() as conn:

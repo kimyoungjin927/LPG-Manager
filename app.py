@@ -121,27 +121,24 @@ with tab1:
     st.subheader("📱 현장 검침 및 가스통 교체 입력")
     work_mode = st.radio("작업 유형", ("🔍 중간검침 (계량기만)", "🔄 가스통 교체 (계량기+통수+잔량)"), horizontal=True)
     staff_list = staff_df["name"].tolist() if not staff_df.empty else ["미등록직원"]
-    all_cust_list = customers_df["name"].tolist() if not customers_df.empty else ["거래처없음"]
+    cust_list = customers_df["name"].tolist() if not customers_df.empty else ["거래처없음"]
 
-    top_c1, top_c2, top_c3 = st.columns([1, 1.2, 1.5])
+    top_c1, top_c2 = st.columns(2)
     visit_dt = top_c1.date_input("방문 일자", value=date.today(), min_value=date(2020, 1, 1), max_value=date(2035, 12, 31))
-
-    t1_search = top_c2.text_input("🔎 거래처 검색", placeholder="상호 또는 주소 일부 입력", key="t1_cust_search")
-    if t1_search.strip():
-        kw = t1_search.strip().lower()
-        filtered_cust_list = [c for c in all_cust_list if kw in c.lower()]
-        if not filtered_cust_list:
-            filtered_cust_list = ["검색 결과 없음"]
-    else:
-        filtered_cust_list = all_cust_list
-
-    selected_cust = top_c3.selectbox(f"거래처 선택 ({len(filtered_cust_list)}건)", filtered_cust_list, key="t1_cust_select")
+    selected_cust = top_c2.selectbox(
+        "거래처 선택 (클릭 후 한 글자만 입력해도 검색됩니다)",
+        cust_list,
+        key="t1_cust_select"
+    )
 
     assigned_mgr = "미지정"
+    default_sup_cnt = 2
     if not customers_df.empty and selected_cust in customers_df["name"].values:
         _, cust_row = next(customers_df[customers_df["name"] == selected_cust].iterrows())
         if pd.notna(cust_row.get("manager_name")):
             assigned_mgr = str(cust_row["manager_name"]).strip()
+        if pd.notna(cust_row.get("default_supply")):
+            default_sup_cnt = int(cust_row["default_supply"])
     default_staff_idx = staff_list.index(assigned_mgr) if assigned_mgr in staff_list else 0
 
     with st.form("field_input_form", clear_on_submit=True):
@@ -154,7 +151,7 @@ with tab1:
         )
         meter_val = c1.number_input("현재 계량기 (루베)", min_value=0.0, step=0.1, format="%.1f")
         if "가스통 교체" in work_mode:
-            supply_cnt = c2.number_input("교체 통수", min_value=1, max_value=20, value=2, step=1)
+            supply_cnt = c2.number_input("교체 통수", min_value=1, max_value=20, value=max(1, default_sup_cnt), step=1)
             actual_rem_val = c2.number_input("교체 후 총 잔량 (kg)", min_value=0.0, step=1.0, format="%.1f")
         else:
             supply_cnt, actual_rem_val = 0, None
@@ -162,7 +159,7 @@ with tab1:
         memo_val = st.text_input("메모 (선택)")
 
         if st.form_submit_button("✅ 저장 및 자동 계산", use_container_width=True, type="primary"):
-            if selected_cust in ["거래처없음", "검색 결과 없음"]:
+            if selected_cust == "거래처없음":
                 st.error("유효한 거래처를 먼저 선택하세요.")
             elif meter_val <= 0:
                 st.error("계량기 숫자를 0보다 크게 입력하세요.")
@@ -186,7 +183,7 @@ with tab1:
                 st.success(f"[{selected_cust}] 저장 완료! (담당: {selected_staff})")
                 st.rerun()
 
-    if not calc_df.empty and selected_cust not in ["거래처없음", "검색 결과 없음"]:
+    if not calc_df.empty and selected_cust != "거래처없음":
         st.divider()
         three_months_ago = (pd.Timestamp(date.today()) - pd.DateOffset(months=3)).strftime("%Y-%m-%d")
         filtered_calc = calc_df[
@@ -400,7 +397,6 @@ with tab4:
                     with engine.begin() as conn:
                         conn.execute(text("DELETE FROM staff WHERE name=:n"), {"n": d_staff})
                     st.rerun()
-
         st.divider()
         st.subheader("3️⃣ 거래처 등록 / 기존 거래처 불러와서 수정")
         s_map = settings_df.set_index("key")["value"].to_dict()
@@ -408,23 +404,17 @@ with tab4:
         sys_f25 = float(s_map.get("factor_25kpa", 2.50))
 
         all_admin_custs = customers_df["name"].tolist() if not customers_df.empty else []
-        adm_s_col1, adm_s_col2 = st.columns([1, 1.5])
-        t4_search = adm_s_col1.text_input("🔎 거래처 검색", placeholder="상호 또는 주소 검색", key="t4_cust_search")
-        if t4_search.strip():
-            kw4 = t4_search.strip().lower()
-            filtered_admin_custs = [c for c in all_admin_custs if kw4 in c.lower()]
-            cust_options = filtered_admin_custs if filtered_admin_custs else ["검색 결과 없음"]
-        else:
-            cust_options = ["➕ 신규 거래처 직접 입력"] + all_admin_custs
+        cust_options = ["➕ 신규 거래처 직접 입력"] + all_admin_custs
 
-        selected_load_cust = adm_s_col2.selectbox(
-            "대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)",
+        selected_load_cust = st.selectbox(
+            "대상 선택 (클릭 후 글자를 입력해 기존 거래처 검색 · 신규 등록은 맨 위 항목 선택)",
             cust_options,
+            index=0,
             key="admin_load_cust_box"
         )
         mgr_choices = ["미지정"] + (staff_df["name"].tolist() if not staff_df.empty else [])
 
-        if selected_load_cust not in ["➕ 신규 거래처 직접 입력", "검색 결과 없음"]:
+        if selected_load_cust != "➕ 신규 거래처 직접 입력":
             _, c_info = next(customers_df[customers_df["name"] == selected_load_cust].iterrows())
             def_name = str(c_info["name"])
             def_press = str(c_info["pressure"])
@@ -438,7 +428,7 @@ with tab4:
 
             c_logs = calc_df[calc_df["거래처명"] == selected_load_cust] if not calc_df.empty else pd.DataFrame()
             if not c_logs.empty:
-                _, first_log = next(c_logs.iterrows())
+                first_log = c_logs.iloc[-1]
                 def_meter = float(first_log["현재계량기"])
                 def_remain = float(first_log["계산잔량kg"])
             else:
@@ -448,7 +438,12 @@ with tab4:
             def_name, def_press, def_press_idx, def_tkg_idx, def_tcnt, def_custom_val, def_mgr_idx, def_meter, def_remain = "", "2.8kPa", 0, 1, 2, None, 0, 0.0, 0.0
 
         r1_c1, r1_c2, r1_c3 = st.columns(3)
-        cname = r1_c1.text_input("거래처명 (상호 - 수정 시 기존 기록도 일괄 변경)", value=def_name, key=f"cname_{selected_load_cust}")
+        cname = r1_c1.text_input(
+            "거래처명 (상호 - 수정 시 기존 기록도 일괄 변경)",
+            value=def_name,
+            placeholder="신규 거래처 상호를 입력하세요",
+            key=f"cname_{selected_load_cust}"
+        )
         cmgr = r1_c2.selectbox("담당 직원 배정", mgr_choices, index=def_mgr_idx, key=f"cmgr_{selected_load_cust}")
         cpress = r1_c3.selectbox("압력 설정 (변경 시 보정계수 자동입력)", ("2.8kPa", "25kPa"), index=def_press_idx, key=f"cpress_{selected_load_cust}")
 
@@ -470,9 +465,7 @@ with tab4:
 
             if st.form_submit_button("💾 거래처 정보 및 시작 날짜 저장", type="primary", use_container_width=True):
                 clean_cname = cname.strip()
-                if selected_load_cust == "검색 결과 없음":
-                    st.error("검색어를 지우거나 올바른 거래처를 선택하세요.")
-                elif not clean_cname:
+                if not clean_cname:
                     st.error("거래처명을 입력하세요.")
                 else:
                     final_cf = None if abs(ccf - auto_factor) < 0.001 else ccf
@@ -505,12 +498,11 @@ with tab4:
                             )
                     st.success(f"[{clean_cname}] 거래처 정보(상호·설정·과거이력)가 일괄 저장되었습니다!")
                     st.rerun()
+
         if not customers_df.empty:
             with st.expander("🗑️ 기존 거래처 삭제하기"):
-                del_c_search = st.text_input("🔎 삭제할 거래처 검색", placeholder="상호 일부 입력", key="del_cust_search")
-                del_cust_list = [c for c in all_admin_custs if del_c_search.strip().lower() in c.lower()] if del_c_search.strip() else all_admin_custs
-                del_c = st.selectbox("삭제할 거래처 선택", del_cust_list if del_cust_list else ["검색 결과 없음"])
-                if st.button("선택한 거래처 및 해당 기록 영구 삭제", use_container_width=True) and del_c != "검색 결과 없음":
+                del_c = st.selectbox("삭제할 거래처 선택 (글자 입력 검색 가능)", all_admin_custs)
+                if st.button("선택한 거래처 및 해당 기록 영구 삭제", use_container_width=True):
                     with engine.begin() as conn:
                         conn.execute(text("DELETE FROM logs WHERE customer_name=:n"), {"n": del_c})
                         conn.execute(text("DELETE FROM customers WHERE name=:n"), {"n": del_c})
@@ -545,4 +537,3 @@ with tab4:
                         conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": int(del_log_id)})
                     st.warning(f"ID {del_log_id}번 기록이 삭제되었습니다.")
                     st.rerun()
-

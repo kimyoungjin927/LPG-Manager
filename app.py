@@ -354,6 +354,10 @@ with tab4:
                     st.rerun()
         st.divider()
         st.subheader("3️⃣ 거래처 등록 / 기존 거래처 불러와서 수정")
+        s_map = settings_df.set_index("key")["value"].to_dict()
+        sys_f28 = float(s_map.get("factor_2_8kpa", 2.00))
+        sys_f25 = float(s_map.get("factor_25kpa", 2.50))
+
         cust_options = ["➕ 신규 거래처 직접 입력"] + (customers_df["name"].tolist() if not customers_df.empty else [])
         selected_load_cust = st.selectbox("대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)", cust_options)
         mgr_choices = ["미지정"] + (staff_df["name"].tolist() if not staff_df.empty else [])
@@ -361,10 +365,12 @@ with tab4:
         if selected_load_cust != "➕ 신규 거래처 직접 입력":
             _, c_info = next(customers_df[customers_df["name"] == selected_load_cust].iterrows())
             def_name = str(c_info["name"])
-            def_press_idx = 0 if c_info["pressure"] == "2.8kPa" else 1
+            def_press = str(c_info["pressure"])
+            def_press_idx = 0 if def_press == "2.8kPa" else 1
             def_tkg_idx = 0 if int(c_info["tank_kg"]) == 20 else 1
             def_tcnt = int(c_info["tank_count"])
-            def_cf = float(c_info["custom_factor"]) if pd.notna(c_info["custom_factor"]) else 0.0
+            has_custom = pd.notna(c_info["custom_factor"]) and float(c_info["custom_factor"]) > 0
+            def_custom_val = float(c_info["custom_factor"]) if has_custom else None
             cur_mgr = str(c_info["manager_name"]) if pd.notna(c_info.get("manager_name")) else "미지정"
             def_mgr_idx = mgr_choices.index(cur_mgr) if cur_mgr in mgr_choices else 0
 
@@ -377,18 +383,21 @@ with tab4:
                 def_meter = 0.0
                 def_remain = float(int(c_info["tank_kg"]) * int(c_info["tank_count"]))
         else:
-            def_name, def_press_idx, def_tkg_idx, def_tcnt, def_cf, def_mgr_idx, def_meter, def_remain = "", 0, 1, 2, 0.0, 0, 0.0, 0.0
+            def_name, def_press, def_press_idx, def_tkg_idx, def_tcnt, def_custom_val, def_mgr_idx, def_meter, def_remain = "", "2.8kPa", 0, 1, 2, None, 0, 0.0, 0.0
+
+        r1_c1, r1_c2, r1_c3 = st.columns(3)
+        cname = r1_c1.text_input("거래처명 (상호)", value=def_name, key=f"cname_{selected_load_cust}")
+        cmgr = r1_c2.selectbox("담당 직원 배정", mgr_choices, index=def_mgr_idx, key=f"cmgr_{selected_load_cust}")
+        cpress = r1_c3.selectbox("압력 설정 (변경 시 보정계수 자동입력)", ("2.8kPa", "25kPa"), index=def_press_idx, key=f"cpress_{selected_load_cust}")
+
+        auto_factor = sys_f28 if cpress == "2.8kPa" else sys_f25
+        display_factor = def_custom_val if (def_custom_val is not None and cpress == def_press) else auto_factor
 
         with st.form("add_or_edit_cust"):
-            r1_c1, r1_c2, r1_c3 = st.columns(3)
-            cname = r1_c1.text_input("거래처명 (상호)", value=def_name)
-            cmgr = r1_c2.selectbox("담당 직원 배정", mgr_choices, index=def_mgr_idx)
-            cpress = r1_c3.selectbox("압력 설정", ("2.8kPa", "25kPa"), index=def_press_idx)
-
             r2_c1, r2_c2, r2_c3 = st.columns(3)
             ctkg = r2_c1.selectbox("용기 규격 (kg)", (20, 50), index=def_tkg_idx)
             ctcnt = r2_c2.number_input("설치 통수", min_value=1, max_value=50, value=def_tcnt)
-            ccf = r2_c3.number_input("개별 보정계수 (0=공통적용)", min_value=0.0, step=0.01, value=def_cf, format="%.2f")
+            ccf = r2_c3.number_input(f"적용 보정계수 ({cpress} 설정값: {auto_factor:.2f})", min_value=0.0, step=0.01, value=display_factor, format="%.2f")
 
             st.markdown("---")
             save_init_log = st.checkbox("계량기 / 잔량 기준값 함께 저장 (신규 등록 또는 기준 재세팅 시 체크)", value=(selected_load_cust == "➕ 신규 거래처 직접 입력"))
@@ -402,7 +411,7 @@ with tab4:
                 if not clean_cname:
                     st.error("거래처명을 입력하세요.")
                 else:
-                    final_cf = ccf if ccf > 0 else None
+                    final_cf = None if abs(ccf - auto_factor) < 0.001 else ccf
                     with engine.begin() as conn:
                         if selected_load_cust != "➕ 신규 거래처 직접 입력" and selected_load_cust != clean_cname:
                             conn.execute(text("DELETE FROM customers WHERE name=:old_n"), {"old_n": selected_load_cust})
@@ -432,11 +441,10 @@ with tab4:
 
         st.divider()
         st.subheader("4️⃣ 계절별(여름/겨울) 압력 보정값")
-        s_map = settings_df.set_index("key")["value"].to_dict()
         with st.form("set_form"):
             b1, b2, b3 = st.columns(3)
-            v28 = b1.number_input("2.8kPa 계수 (기본 2.00)", value=float(s_map.get("factor_2_8kpa", 2.0)), step=0.01, format="%.2f")
-            v25 = b2.number_input("25kPa 계수 (기본 2.50)", value=float(s_map.get("factor_25kpa", 2.5)), step=0.01, format="%.2f")
+            v28 = b1.number_input("2.8kPa 계수 (기본 2.00)", value=sys_f28, step=0.01, format="%.2f")
+            v25 = b2.number_input("25kPa 계수 (기본 2.50)", value=sys_f25, step=0.01, format="%.2f")
             verr = b3.number_input("오차경고 기준 (kg)", value=float(s_map.get("error_threshold", -10.0)), step=1.0)
             if st.form_submit_button("💾 보정값 저장", type="primary", use_container_width=True):
                 with engine.begin() as conn:

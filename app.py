@@ -467,14 +467,19 @@ with tab4:
                     st.success(f"[{clean_cname}] 거래처 정보(상호·설정·과거이력)가 일괄 저장되었습니다!")
                     st.rerun()
 
-        if not customers_df.empty:
-            with st.expander("🗑️ 기존 거래처 삭제하기"):
-                del_c = st.selectbox("삭제할 거래처 선택", customers_df["name"].tolist())
-                if st.button("선택한 거래처 영구 삭제", use_container_width=True):
-                    with engine.begin() as conn:
-                        conn.execute(text("DELETE FROM customers WHERE name=:n"), {"n": del_c})
-                    st.warning(f"[{del_c}] 거래처가 삭제되었습니다.")
-                    st.rerun()
+            if not customers_df.empty:
+                with st.expander("🗑️ 기존 거래처 삭제하기"):
+                    del_c = st.selectbox("삭제할 거래처 선택", customers_df["name"].tolist())
+                    if st.button("선택한 거래처 및 해당 기록 영구 삭제", use_container_width=True):
+                        with engine.begin() as conn:
+                            conn.execute(text("DELETE FROM logs WHERE customer_name=:n"), {"n": del_c})
+                             conn.execute(text("DELETE FROM customers WHERE name=:n"), {"n": del_c})
+                      # 남아있는 기록이 0건이면 ID 번호를 1번부터 다시 시작하도록 초기화
+                            remain_cnt = conn.execute(text("SELECT COUNT(*) FROM logs")).scalar()
+                            if remain_cnt == 0:
+                                conn.execute(text("TRUNCATE TABLE logs RESTART IDENTITY"))
+                st.warning(f"[{del_c}] 거래처 및 관련 기록이 삭제되었습니다.")
+                st.rerun()
 
         st.divider()
         st.subheader("4️⃣ 계절별(여름/겨울) 압력 보정값")

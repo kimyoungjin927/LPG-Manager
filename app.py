@@ -7,6 +7,7 @@ import io
 
 st.set_page_config(page_title="LPG 공급·검침 통합관리", page_icon="🔥", layout="wide")
 
+
 def get_engine():
     url_obj = URL.create(
         drivername="postgresql+psycopg2",
@@ -18,7 +19,9 @@ def get_engine():
     )
     return create_engine(url_obj, connect_args={"sslmode": "require"}, pool_pre_ping=True)
 
+
 engine = get_engine()
+
 
 def init_initial_customers():
     with engine.begin() as conn:
@@ -57,6 +60,7 @@ def init_initial_customers():
                     {"n": name, "p": press, "kg": kg, "cnt": cnt, "sup": sup, "cf": cf, "mg": mgr}
                 )
 
+
 def get_data():
     with engine.connect() as conn:
         s_df = pd.read_sql(text("SELECT * FROM settings"), conn)
@@ -64,6 +68,7 @@ def get_data():
         l_df = pd.read_sql(text("SELECT * FROM logs ORDER BY visit_date ASC, id ASC"), conn)
         st_df = pd.read_sql(text("SELECT * FROM staff ORDER BY name"), conn)
     return s_df, c_df, l_df, st_df
+
 
 def calculate_all_logs(settings_df, customers_df, logs_df):
     if logs_df.empty:
@@ -73,18 +78,15 @@ def calculate_all_logs(settings_df, customers_df, logs_df):
     f_25 = settings.get("factor_25kpa", 2.50)
     cust_map = customers_df.set_index("name").to_dict("index")
     rows = []
-
     for cust_name, group in logs_df.groupby("customer_name", sort=False):
         c_info = cust_map.get(cust_name, {"pressure": "2.8kPa", "tank_kg": 50, "tank_count": 2, "custom_factor": None})
         factor = float(c_info["custom_factor"]) if (pd.notna(c_info["custom_factor"]) and c_info["custom_factor"] > 0) else (f_25 if c_info["pressure"] == "25kPa" else f_28)
         tank_kg = float(c_info["tank_kg"])
         prev_meter, prev_remain = None, None
-
         for _, row in group.iterrows():
             cur_meter = float(row["meter_reading"])
             sup_cnt = int(row["supply_count"])
             act_rem = float(row["actual_remain"]) if pd.notna(row["actual_remain"]) else None
-
             if prev_meter is None:
                 used_m3, used_kg = 0.0, 0.0
                 calc_remain = act_rem if act_rem is not None else (tank_kg * c_info["tank_count"])
@@ -95,43 +97,51 @@ def calculate_all_logs(settings_df, customers_df, logs_df):
                 expected_remain = round(prev_remain + (sup_cnt * tank_kg) - used_kg, 2)
                 calc_remain = act_rem if act_rem is not None else expected_remain
                 error_kg = round(act_rem - expected_remain, 2) if act_rem is not None else None
-
             rows.append({
                 "ID": row["id"], "방문일자": str(row["visit_date"]), "작업구분": row["work_type"],
                 "거래처명": cust_name, "압력": c_info["pressure"], "적용계수": factor,
                 "직전계량기": prev_meter if prev_meter is not None else cur_meter,
                 "현재계량기": cur_meter, "사용루베": round(used_m3, 2), "환산사용kg": used_kg,
-                "교체통수": sup_cnt, "공급kg": sup_cnt * tank_kg, "실제입력잔량kg": act_rem,
-                "계산잔량kg": calc_remain, "검침오차kg": error_kg, "담당자": row["staff_name"], "메모": row["memo"]
+                "교체통수": sup_cnt, "공급kg": sup_cnt * tank_kg,
+                "실제입력잔량kg": act_rem, "계산잔량kg": calc_remain,
+                "검침오차kg": error_kg, "담당자": row["staff_name"], "메모": row["memo"]
             })
             prev_meter, prev_remain = cur_meter, calc_remain
-
     return pd.DataFrame(rows).sort_values(by=["방문일자", "ID"], ascending=[False, False])
+
+
 init_initial_customers()
 settings_df, customers_df, logs_df, staff_df = get_data()
 calc_df = calculate_all_logs(settings_df, customers_df, logs_df)
 err_limit = float(settings_df.set_index("key").loc["error_threshold", "value"])
 
 st.title("🔥 LPG 공급·검침 통합관리 시스템")
-
 tab1, tab2, tab3, tab4 = st.tabs(("📱 현장 입력", "📊 거래처 현황", "📅 월간 정산표", "⚙️ 관리자 전용"))
-
 with tab1:
     st.subheader("📱 현장 검침 및 가스통 교체 입력")
     work_mode = st.radio("작업 유형", ("🔍 중간검침 (계량기만)", "🔄 가스통 교체 (계량기+통수+잔량)"), horizontal=True)
     staff_list = staff_df["name"].tolist() if not staff_df.empty else ["미등록직원"]
-    cust_list = customers_df["name"].tolist() if not customers_df.empty else ["거래처없음"]
+    all_cust_list = customers_df["name"].tolist() if not customers_df.empty else ["거래처없음"]
 
-    top_c1, top_c2 = st.columns(2)
+    top_c1, top_c2, top_c3 = st.columns([1, 1.2, 1.5])
     visit_dt = top_c1.date_input("방문 일자", value=date.today(), min_value=date(2020, 1, 1), max_value=date(2035, 12, 31))
-    selected_cust = top_c2.selectbox("거래처 선택 (상호 검색 가능)", cust_list)
+
+    t1_search = top_c2.text_input("🔎 거래처 검색", placeholder="상호 또는 주소 일부 입력", key="t1_cust_search")
+    if t1_search.strip():
+        kw = t1_search.strip().lower()
+        filtered_cust_list = [c for c in all_cust_list if kw in c.lower()]
+        if not filtered_cust_list:
+            filtered_cust_list = ["검색 결과 없음"]
+    else:
+        filtered_cust_list = all_cust_list
+
+    selected_cust = top_c3.selectbox(f"거래처 선택 ({len(filtered_cust_list)}건)", filtered_cust_list, key="t1_cust_select")
 
     assigned_mgr = "미지정"
     if not customers_df.empty and selected_cust in customers_df["name"].values:
         _, cust_row = next(customers_df[customers_df["name"] == selected_cust].iterrows())
         if pd.notna(cust_row.get("manager_name")):
             assigned_mgr = str(cust_row["manager_name"]).strip()
-
     default_staff_idx = staff_list.index(assigned_mgr) if assigned_mgr in staff_list else 0
 
     with st.form("field_input_form", clear_on_submit=True):
@@ -143,42 +153,49 @@ with tab1:
             key=f"field_staff_{selected_cust}"
         )
         meter_val = c1.number_input("현재 계량기 (루베)", min_value=0.0, step=0.1, format="%.1f")
-
         if "가스통 교체" in work_mode:
             supply_cnt = c2.number_input("교체 통수", min_value=1, max_value=20, value=2, step=1)
             actual_rem_val = c2.number_input("교체 후 총 잔량 (kg)", min_value=0.0, step=1.0, format="%.1f")
         else:
             supply_cnt, actual_rem_val = 0, None
             c2.info("🔍 중간검침 모드: 계량기 숫자만 입력하면 남은 예상 잔량이 자동 계산됩니다.")
-
         memo_val = st.text_input("메모 (선택)")
+
         if st.form_submit_button("✅ 저장 및 자동 계산", use_container_width=True, type="primary"):
-            if meter_val <= 0:
+            if selected_cust in ["거래처없음", "검색 결과 없음"]:
+                st.error("유효한 거래처를 먼저 선택하세요.")
+            elif meter_val <= 0:
                 st.error("계량기 숫자를 0보다 크게 입력하세요.")
             else:
                 w_type = "가스교체" if "가스통 교체" in work_mode else "중간검침"
                 with engine.begin() as conn:
                     conn.execute(
                         text("INSERT INTO logs (visit_date, customer_name, work_type, meter_reading, supply_count, actual_remain, staff_name, memo, created_at) VALUES (:vd,:cn,:wt,:mr,:sc,:ar,:sn,:mm,:ca)"),
-                        {"vd": visit_dt.strftime("%Y-%m-%d"), "cn": selected_cust, "wt": w_type, "mr": meter_val, "sc": supply_cnt, "ar": actual_rem_val, "sn": selected_staff, "mm": memo_val, "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                        {
+                            "vd": visit_dt.strftime("%Y-%m-%d"),
+                            "cn": selected_cust,
+                            "wt": w_type,
+                            "mr": meter_val,
+                            "sc": supply_cnt,
+                            "ar": actual_rem_val,
+                            "sn": selected_staff,
+                            "mm": memo_val,
+                            "ca": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
                     )
                 st.success(f"[{selected_cust}] 저장 완료! (담당: {selected_staff})")
                 st.rerun()
 
-    if not calc_df.empty:
+    if not calc_df.empty and selected_cust not in ["거래처없음", "검색 결과 없음"]:
         st.divider()
         three_months_ago = (pd.Timestamp(date.today()) - pd.DateOffset(months=3)).strftime("%Y-%m-%d")
         filtered_calc = calc_df[
-            (calc_df["거래처명"] == selected_cust) &
-            (calc_df["방문일자"] >= three_months_ago)
+            (calc_df["거래처명"] == selected_cust) & (calc_df["방문일자"] >= three_months_ago)
         ].copy()
-
         st.caption(f"📋 **[{selected_cust}]** 최근 3개월 내역 ({three_months_ago} 이후) — 오입력 시 왼쪽 `선택` 체크 후 삭제")
-
         if not filtered_calc.empty:
             view_df = filtered_calc[["ID", "방문일자", "작업구분", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자"]].copy()
             view_df.insert(0, "선택", False)
-
             edited_view = st.data_editor(
                 view_df,
                 use_container_width=True,
@@ -189,7 +206,6 @@ with tab1:
                 },
                 key=f"field_logs_editor_{selected_cust}"
             )
-
             selected_rows = edited_view[edited_view["선택"] == True]
             if not selected_rows.empty:
                 if st.button(f"🗑️ 선택한 {len(selected_rows)}건 기록 즉시 삭제", type="primary", use_container_width=True):
@@ -206,26 +222,32 @@ with tab2:
     st.subheader("📊 거래처별 현재 예상 잔량 및 오차 현황")
     staff_filter_opts = ["전체 보기"] + (staff_df["name"].tolist() if not staff_df.empty else []) + ["미지정"]
     sel_mgr = st.selectbox("👤 담당 직원 선택 (선택한 직원의 담당 거래처만 조회)", staff_filter_opts)
-
     summary_rows = []
     for _, c_row in customers_df.iterrows():
         cname = c_row["name"]
         mgr_name = str(c_row["manager_name"]) if pd.notna(c_row.get("manager_name")) and str(c_row.get("manager_name")).strip() else "미지정"
         if sel_mgr != "전체 보기" and mgr_name != sel_mgr:
             continue
-
         c_logs = calc_df[calc_df["거래처명"] == cname] if not calc_df.empty else pd.DataFrame()
         if not c_logs.empty:
             _, latest = next(c_logs.iterrows())
             last_date, last_meter, est_remain = latest["방문일자"], latest["현재계량기"], latest["계산잔량kg"]
             valid_err = c_logs.dropna(subset=["검침오차kg"])
-            last_error = next(valid_err.iterrows())[1]["검침오차kg"] if not valid_err.empty else 0.0
+            last_error = next(valid_err.iterrows())["검침오차kg"] if not valid_err.empty else 0.0
         else:
             last_date, last_meter, est_remain, last_error = "-", 0.0, 0.0, 0.0
-
         status = "🚨 오차경고" if last_error <= err_limit else ("⚠️ 배달임박" if (est_remain > 0 and est_remain <= c_row["tank_kg"] * 0.6) else "✅ 정상")
-        summary_rows.append({"상태": status, "담당직원": mgr_name, "거래처명": cname, "압력": c_row["pressure"], "구성": f"{c_row['tank_kg']}×{c_row['tank_count']}", "최근방문": last_date, "최신계량기": last_meter, "예상잔량(kg)": est_remain, "최근오차(kg)": last_error})
-
+        summary_rows.append({
+            "상태": status,
+            "담당직원": mgr_name,
+            "거래처명": cname,
+            "압력": c_row["pressure"],
+            "구성": f"{c_row['tank_kg']}×{c_row['tank_count']}",
+            "최근방문": last_date,
+            "최신계량기": last_meter,
+            "예상잔량(kg)": est_remain,
+            "최근오차(kg)": last_error
+        })
     sum_df = pd.DataFrame(summary_rows)
     if not sum_df.empty:
         m1, m2, m3 = st.columns(3)
@@ -235,7 +257,6 @@ with tab2:
         st.dataframe(sum_df, use_container_width=True, hide_index=True)
     else:
         st.info(f"[{sel_mgr}] 담당으로 배정된 거래처가 없습니다.")
-
 with tab3:
     st.subheader("📅 월간 검침·잔량 현황표")
     now = datetime.now()
@@ -269,6 +290,7 @@ with tab3:
         monthly_matrix.append(row_dict)
 
     st.dataframe(pd.DataFrame(monthly_matrix), use_container_width=True, hide_index=True)
+
 with tab4:
     st.subheader("🔒 관리자 전용 (공급정산 / 설정 / 삭제)")
     if "is_admin" not in st.session_state:
@@ -377,17 +399,31 @@ with tab4:
                     with engine.begin() as conn:
                         conn.execute(text("DELETE FROM staff WHERE name=:n"), {"n": d_staff})
                     st.rerun()
+
         st.divider()
         st.subheader("3️⃣ 거래처 등록 / 기존 거래처 불러와서 수정")
         s_map = settings_df.set_index("key")["value"].to_dict()
         sys_f28 = float(s_map.get("factor_2_8kpa", 2.00))
         sys_f25 = float(s_map.get("factor_25kpa", 2.50))
 
-        cust_options = ["➕ 신규 거래처 직접 입력"] + (customers_df["name"].tolist() if not customers_df.empty else [])
-        selected_load_cust = st.selectbox("대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)", cust_options, key="admin_load_cust_box")
+        all_admin_custs = customers_df["name"].tolist() if not customers_df.empty else []
+        adm_s_col1, adm_s_col2 = st.columns([1, 1.5])
+        t4_search = adm_s_col1.text_input("🔎 거래처 검색", placeholder="상호 또는 주소 검색", key="t4_cust_search")
+        if t4_search.strip():
+            kw4 = t4_search.strip().lower()
+            filtered_admin_custs = [c for c in all_admin_custs if kw4 in c.lower()]
+            cust_options = filtered_admin_custs if filtered_admin_custs else ["검색 결과 없음"]
+        else:
+            cust_options = ["➕ 신규 거래처 직접 입력"] + all_admin_custs
+
+        selected_load_cust = adm_s_col2.selectbox(
+            "대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)",
+            cust_options,
+            key="admin_load_cust_box"
+        )
         mgr_choices = ["미지정"] + (staff_df["name"].tolist() if not staff_df.empty else [])
 
-        if selected_load_cust != "➕ 신규 거래처 직접 입력":
+        if selected_load_cust not in ["➕ 신규 거래처 직접 입력", "검색 결과 없음"]:
             _, c_info = next(customers_df[customers_df["name"] == selected_load_cust].iterrows())
             def_name = str(c_info["name"])
             def_press = str(c_info["pressure"])
@@ -433,7 +469,9 @@ with tab4:
 
             if st.form_submit_button("💾 거래처 정보 및 시작 날짜 저장", type="primary", use_container_width=True):
                 clean_cname = cname.strip()
-                if not clean_cname:
+                if selected_load_cust == "검색 결과 없음":
+                    st.error("검색어를 지우거나 올바른 거래처를 선택하세요.")
+                elif not clean_cname:
                     st.error("거래처명을 입력하세요.")
                 else:
                     final_cf = None if abs(ccf - auto_factor) < 0.001 else ccf
@@ -466,11 +504,12 @@ with tab4:
                             )
                     st.success(f"[{clean_cname}] 거래처 정보(상호·설정·과거이력)가 일괄 저장되었습니다!")
                     st.rerun()
-
         if not customers_df.empty:
             with st.expander("🗑️ 기존 거래처 삭제하기"):
-                del_c = st.selectbox("삭제할 거래처 선택", customers_df["name"].tolist())
-                if st.button("선택한 거래처 및 해당 기록 영구 삭제", use_container_width=True):
+                del_c_search = st.text_input("🔎 삭제할 거래처 검색", placeholder="상호 일부 입력", key="del_cust_search")
+                del_cust_list = [c for c in all_admin_custs if del_c_search.strip().lower() in c.lower()] if del_c_search.strip() else all_admin_custs
+                del_c = st.selectbox("삭제할 거래처 선택", del_cust_list if del_cust_list else ["검색 결과 없음"])
+                if st.button("선택한 거래처 및 해당 기록 영구 삭제", use_container_width=True) and del_c != "검색 결과 없음":
                     with engine.begin() as conn:
                         conn.execute(text("DELETE FROM logs WHERE customer_name=:n"), {"n": del_c})
                         conn.execute(text("DELETE FROM customers WHERE name=:n"), {"n": del_c})
@@ -479,7 +518,6 @@ with tab4:
                             conn.execute(text("TRUNCATE TABLE logs RESTART IDENTITY"))
                     st.warning(f"[{del_c}] 거래처 및 관련 기록이 삭제되었습니다.")
                     st.rerun()
-
 
         st.divider()
         st.subheader("4️⃣ 계절별(여름/겨울) 압력 보정값")
@@ -506,3 +544,4 @@ with tab4:
                         conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": int(del_log_id)})
                     st.warning(f"ID {del_log_id}번 기록이 삭제되었습니다.")
                     st.rerun()
+

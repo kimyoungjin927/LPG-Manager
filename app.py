@@ -182,8 +182,7 @@ with tab2:
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
 with tab3:
-    st.subheader("📅 월간 정산표 & 공급 내역 조회")
-    
+    st.subheader("📅 월간 검침·잔량 현황표")
     now = datetime.now()
     y_col, m_col = st.columns(2)
     year_list = list(range(2025, 2031))
@@ -192,44 +191,9 @@ with tab3:
     sel_month = m_col.selectbox("조회 월", list(range(1, 13)), index=now.month - 1, format_func=lambda x: f"{x}월")
 
     target_month = f"{sel_year}-{sel_month:02d}"
-    st.info(f"📌 현재 조회 기준월: **{sel_year}년 {sel_month}월** (날짜를 변경하면 해당 월의 기록이 즉시 조회됩니다)")
+    st.caption(f"📌 **{sel_year}년 {sel_month}월** 전체 거래처 일자별 현황 (칸 표시: `계량기 / 계산잔량kg`)")
 
     month_logs = calc_df[calc_df["방문일자"].str.startswith(target_month)].copy() if not calc_df.empty else pd.DataFrame()
-    
-    # 화면 보기 모드 선택 (관리자용 공급날짜 요약 vs 전체 달력표)
-    view_mode = st.radio(
-        "보기 방식 선택",
-        ["🚚 관리자용: 공급(교체) 날짜만 가독성 요약 보기", "📆 전체 달력형 정산표 (1일~31일 계량기/잔량)"],
-        horizontal=True
-    )
-
-    # 1. 관리자용 공급 날짜 요약 데이터 생성
-    supply_summary_rows = []
-    if not month_logs.empty:
-        sup_only = month_logs[month_logs["교체통수"] > 0].sort_values("방문일자")
-    else:
-        sup_only = pd.DataFrame()
-
-    for _, c_row in customers_df.iterrows():
-        cname = c_row["name"]
-        c_sup = sup_only[sup_only["거래처명"] == cname] if not sup_only.empty else pd.DataFrame()
-        if not c_sup.empty:
-            date_badges = []
-            for _, s_row in c_sup.iterrows():
-                mm_dd = s_row["방문일자"][5:]
-                date_badges.append(f"{mm_dd} ({int(s_row['교체통수'])}통)")
-            supply_summary_rows.append({
-                "거래처명": cname,
-                "압력": c_row["pressure"],
-                "용기규격": f"{c_row['tank_kg']}kg",
-                "공급 횟수": f"{len(c_sup)}회",
-                "총 공급통수": f"{int(c_sup['교체통수'].sum())}통",
-                "총 공급량(kg)": round(c_sup["공급kg"].sum(), 1),
-                "공급 날짜 상세 (월-일 및 통수)": "  /  ".join(date_badges)
-            })
-    sup_sum_df = pd.DataFrame(supply_summary_rows)
-
-    # 2. 전체 달력형 정산표(1일~31일) 데이터 생성
     monthly_matrix = []
     for _, c_row in customers_df.iterrows():
         cname = c_row["name"]
@@ -248,75 +212,96 @@ with tab3:
         else:
             row_dict["월사용(kg)"], row_dict["월공급(kg)"], row_dict["월오차(kg)"] = 0.0, 0.0, 0.0
         monthly_matrix.append(row_dict)
-    matrix_df = pd.DataFrame(monthly_matrix)
 
-    # 선택된 보기 방식에 따라 화면 출력
-    if "공급(교체) 날짜만" in view_mode:
-        st.markdown(f"#### 🚚 {sel_year}년 {sel_month}월 가스 공급(교체) 거래처 요약")
-        if not sup_sum_df.empty:
-            st.dataframe(sup_sum_df, use_container_width=True, hide_index=True)
-            st.markdown(f"#### 📝 {sel_year}년 {sel_month}월 날짜별 공급 이력 상세")
-            st.dataframe(
-                sup_only[["방문일자", "거래처명", "압력", "교체통수", "공급kg", "현재계량기", "실제입력잔량kg", "검침오차kg", "담당자", "메모"]],
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.warning(f"{sel_year}년 {sel_month}월에는 가스통 공급(교체) 기록이 없습니다.")
-    else:
-        st.markdown(f"#### 📆 {sel_year}년 {sel_month}월 전체 달력형 정산표 (계량기/계산잔량kg)")
-        st.dataframe(matrix_df, use_container_width=True, hide_index=True)
-        st.markdown(f"#### 📋 {sel_year}년 {sel_month}월 전체 검침·공급 상세 기록 ({len(month_logs)}건)")
-        if not month_logs.empty:
-            st.dataframe(
-                month_logs[["ID", "방문일자", "작업구분", "거래처명", "현재계량기", "환산사용kg", "교체통수", "계산잔량kg", "검침오차kg", "담당자", "메모"]],
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.caption(f"{sel_year}년 {sel_month}월에는 입력된 기록이 없습니다.")
-
-    st.divider()
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        if not sup_sum_df.empty:
-            sup_sum_df.to_excel(writer, index=False, sheet_name=f"{sel_month}월_공급날짜요약")
-        matrix_df.to_excel(writer, index=False, sheet_name=f"{sel_month}월_달력정산표")
-        if not month_logs.empty:
-            month_logs.to_excel(writer, index=False, sheet_name=f"{sel_month}월_전체상세기록")
-    st.download_button(
-        label=f"📥 {sel_year}년 {sel_month}월 정산표 & 공급요약 엑셀(.xlsx) 다운로드",
-        data=output.getvalue(),
-        file_name=f"LPG_정산표_{target_month}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True
-    )
+    st.dataframe(pd.DataFrame(monthly_matrix), use_container_width=True, hide_index=True)
 
 with tab4:
-    st.subheader("🔒 관리자 전용 설정")
+    st.subheader("🔒 관리자 전용 (공급정산 / 설정 / 삭제)")
     if "is_admin" not in st.session_state:
         st.session_state["is_admin"] = False
 
     if not st.session_state["is_admin"]:
-        st.warning("직원 관리, 거래처 등록·수정·삭제, 계절 보정값 수정은 관리자 비밀번호가 필요합니다.")
+        st.warning("공급(교체) 날짜 요약, 엑셀 정산 다운로드, 직원·거래처 관리, 계절 보정값은 관리자 비밀번호가 필요합니다.")
         pw_input = st.text_input("관리자 비밀번호 입력", type="password")
         if st.button("🔓 관리자 잠금 해제", type="primary", use_container_width=True):
-            admin_pw = str(st.secrets.get("ADMIN_PASS", "1234"))
-            if pw_input == admin_pw:
+            if pw_input == str(st.secrets.get("ADMIN_PASS", "1234")):
                 st.session_state["is_admin"] = True
                 st.rerun()
             else:
                 st.error("비밀번호가 일치하지 않습니다.")
     else:
-        col_top1, col_top2 = st.columns([4, 1])
+        col_top1, col_top2 = st.columns([3, 1])
         col_top1.success("✅ 관리자 모드로 인증되었습니다.")
         if col_top2.button("🔒 잠그기", use_container_width=True):
             st.session_state["is_admin"] = False
             st.rerun()
 
         st.divider()
-        st.subheader("1️⃣ 직원 등록 및 삭제")
+        st.subheader("1️⃣ [관리자 전용] 월별 가스 공급(교체) 날짜 요약 & 엑셀")
+        ay_col, am_col = st.columns(2)
+        a_year = ay_col.selectbox("정산 연도", year_list, index=default_y_idx, format_func=lambda x: f"{x}년", key="admin_y")
+        a_month = am_col.selectbox("정산 월", list(range(1, 13)), index=now.month - 1, format_func=lambda x: f"{x}월", key="admin_m")
+        a_target = f"{a_year}-{a_month:02d}"
+
+        a_logs = calc_df[calc_df["방문일자"].str.startswith(a_target)].copy() if not calc_df.empty else pd.DataFrame()
+        sup_only = a_logs[a_logs["교체통수"] > 0].sort_values("방문일자") if not a_logs.empty else pd.DataFrame()
+
+        supply_summary_rows = []
+        for _, c_row in customers_df.iterrows():
+            cname = c_row["name"]
+            c_sup = sup_only[sup_only["거래처명"] == cname] if not sup_only.empty else pd.DataFrame()
+            if not c_sup.empty:
+                date_badges = [f"{r['방문일자'][5:]} ({int(r['교체통수'])}통)" for _, r in c_sup.iterrows()]
+                supply_summary_rows.append({
+                    "거래처명": cname, "압력": c_row["pressure"], "용기규격": f"{c_row['tank_kg']}kg",
+                    "공급 횟수": f"{len(c_sup)}회", "총 공급통수": f"{int(c_sup['교체통수'].sum())}통",
+                    "총 공급량(kg)": round(c_sup["공급kg"].sum(), 1),
+                    "공급 날짜 상세 (월-일 및 통수)": "  /  ".join(date_badges)
+                })
+        sup_sum_df = pd.DataFrame(supply_summary_rows)
+
+        if not sup_sum_df.empty:
+            st.dataframe(sup_sum_df, use_container_width=True, hide_index=True)
+            with st.expander(f"📝 {a_year}년 {a_month}월 공급(교체) 상세 건별 내역 보기"):
+                st.dataframe(sup_only[["ID", "방문일자", "거래처명", "압력", "교체통수", "공급kg", "현재계량기", "실제입력잔량kg", "검침오차kg", "담당자", "메모"]], use_container_width=True, hide_index=True)
+        else:
+            st.info(f"{a_year}년 {a_month}월에는 가스통 공급(교체) 내역이 없습니다.")
+        a_matrix_rows = []
+        for _, c_row in customers_df.iterrows():
+            cname = c_row["name"]
+            r_dict = {"거래처명": cname, "압력": c_row["pressure"], "구성": f"{c_row['tank_kg']}×{c_row['tank_count']}"}
+            for d in range(1, 32):
+                r_dict[f"{d}일"] = ""
+            c_m = a_logs[a_logs["거래처명"] == cname] if not a_logs.empty else pd.DataFrame()
+            if not c_m.empty:
+                for _, lr in c_m.sort_values("방문일자").iterrows():
+                    dn = int(lr["방문일자"][-2:])
+                    ct = f"{int(lr['현재계량기'])}/{int(lr['계산잔량kg'])}"
+                    r_dict[f"{dn}일"] = f"{r_dict[f'{dn}일']} | {ct}" if r_dict[f"{dn}일"] else ct
+                r_dict["월사용(kg)"] = round(c_m["환산사용kg"].sum(), 1)
+                r_dict["월공급(kg)"] = round(c_m["공급kg"].sum(), 1)
+                r_dict["월오차(kg)"] = round(c_m["검침오차kg"].dropna().sum(), 1)
+            else:
+                r_dict["월사용(kg)"], r_dict["월공급(kg)"], r_dict["월오차(kg)"] = 0.0, 0.0, 0.0
+            a_matrix_rows.append(r_dict)
+        a_matrix_df = pd.DataFrame(a_matrix_rows)
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            if not sup_sum_df.empty:
+                sup_sum_df.to_excel(writer, index=False, sheet_name=f"{a_month}월_공급날짜요약")
+            a_matrix_df.to_excel(writer, index=False, sheet_name=f"{a_month}월_달력정산표")
+            if not a_logs.empty:
+                a_logs.to_excel(writer, index=False, sheet_name=f"{a_month}월_전체상세기록")
+        st.download_button(
+            label=f"📥 {a_year}년 {a_month}월 정산표 & 공급요약 엑셀(.xlsx) 다운로드",
+            data=output.getvalue(), file_name=f"LPG_관리자정산_{a_target}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary", use_container_width=True
+        )
+
+        st.divider()
+        st.subheader("2️⃣ 직원 등록 및 삭제")
         sc1, sc2 = st.columns(2)
         with sc1:
             with st.form("add_staff", clear_on_submit=True):
@@ -339,8 +324,7 @@ with tab4:
                     st.rerun()
 
         st.divider()
-        st.subheader("2️⃣ 거래처 등록 / 기존 거래처 불러와서 수정")
-        
+        st.subheader("3️⃣ 거래처 등록 / 기존 거래처 불러와서 수정")
         cust_options = ["➕ 신규 거래처 직접 입력"] + (customers_df["name"].tolist() if not customers_df.empty else [])
         selected_load_cust = st.selectbox("대상 선택 (기존 거래처를 고르면 아래 칸에 자동 입력됩니다)", cust_options)
 
@@ -360,13 +344,7 @@ with tab4:
                 def_meter = 0.0
                 def_remain = float(int(c_info["tank_kg"]) * int(c_info["tank_count"]))
         else:
-            def_name = ""
-            def_press_idx = 0
-            def_tkg_idx = 1
-            def_tcnt = 2
-            def_cf = 0.0
-            def_meter = 0.0
-            def_remain = 0.0
+            def_name, def_press_idx, def_tkg_idx, def_tcnt, def_cf, def_meter, def_remain = "", 0, 1, 2, 0.0, 0.0, 0.0
 
         with st.form("add_or_edit_cust"):
             r1_c1, r1_c2 = st.columns(2)
@@ -418,7 +396,7 @@ with tab4:
                     st.rerun()
 
         st.divider()
-        st.subheader("3️⃣ 계절별(여름/겨울) 압력 보정값")
+        st.subheader("4️⃣ 계절별(여름/겨울) 압력 보정값")
         s_map = settings_df.set_index("key")["value"].to_dict()
         with st.form("set_form"):
             b1, b2, b3 = st.columns(3)
@@ -434,7 +412,7 @@ with tab4:
                 st.rerun()
 
         st.divider()
-        st.subheader("4️⃣ 잘못 입력된 검침/교체 기록 삭제")
+        st.subheader("5️⃣ 잘못 입력된 검침/교체 기록 삭제")
         if not calc_df.empty:
             with st.form("del_log_form"):
                 del_log_id = st.number_input("삭제할 기록의 ID 번호", min_value=1, step=1)
@@ -443,3 +421,4 @@ with tab4:
                         conn.execute(text("DELETE FROM logs WHERE id=:id"), {"id": int(del_log_id)})
                     st.warning(f"ID {del_log_id}번 기록이 삭제되었습니다.")
                     st.rerun()
+

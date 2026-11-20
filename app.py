@@ -233,7 +233,8 @@ with tab2:
             _, latest = next(c_logs.iterrows())
             last_date, last_meter, est_remain = latest["방문일자"], latest["현재계량기"], latest["계산잔량kg"]
             valid_err = c_logs.dropna(subset=["검침오차kg"])
-            last_error = next(valid_err.iterrows())["검침오차kg"] if not valid_err.empty else 0.0
+            last_error = float(valid_err["검침오차kg"].iloc[0]) if not valid_err.empty else 0.0
+
         else:
             last_date, last_meter, est_remain, last_error = "-", 0.0, 0.0, 0.0
         status = "🚨 오차경고" if last_error <= err_limit else ("⚠️ 배달임박" if (est_remain > 0 and est_remain <= c_row["tank_kg"] * 0.6) else "✅ 정상")
